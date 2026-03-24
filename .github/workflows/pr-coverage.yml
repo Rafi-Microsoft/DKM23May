@@ -4,8 +4,11 @@ on:
   pull_request:
     types:
       - opened
+      - synchronize   # new commits / branch updates
+      - reopened
       - edited
-      - synchronize
+      - ready_for_review
+      - review_requested
 
 jobs:
   test:
