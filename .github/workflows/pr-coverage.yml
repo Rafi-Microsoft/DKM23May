@@ -1,4 +1,4 @@
-name: PR Coverage Check
+name: PR Coverage Check (Universal)
 
 on:
   pull_request_target:
@@ -20,15 +20,44 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Upgrade pip
+        run: pip install --upgrade pip
+
+      # 🔥 Smart dependency installation (handles all repo types)
+      - name: Install dependencies (auto-detect)
         run: |
-          pip install -r requirements.txt
           pip install pytest pytest-cov
 
+          echo "Checking dependency files..."
+
+          if [ -f pyproject.toml ]; then
+            echo "Installing from pyproject.toml"
+            pip install .
+          fi
+
+          if [ -f requirements.txt ]; then
+            echo "Installing root requirements.txt"
+            pip install -r requirements.txt
+          fi
+
+          # Install all nested requirements automatically
+          find . -name "requirements.txt" -not -path "./.venv/*" | while read req; do
+            echo "Installing $req"
+            pip install -r $req
+          done
+
+      # 🔥 Smart test discovery
       - name: Run tests with coverage
         run: |
-          pytest --cov=. --cov-report=xml
+          echo "Running pytest..."
+          
+          if [ -d tests ]; then
+            pytest tests --cov=. --cov-report=xml
+          else
+            pytest --cov=. --cov-report=xml
+          fi
 
+      # 🔥 PR Coverage Comment
       - name: Add Coverage Comment to PR
         uses: MishaKav/pytest-coverage-comment@v1
         with:
