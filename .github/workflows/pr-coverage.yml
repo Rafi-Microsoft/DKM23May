@@ -1,7 +1,7 @@
 name: PR Coverage Check (Universal)
 
 on:
-  pull_request:
+  pull_request_target:
     types:
       - opened
       - synchronize   # new commits / branch updates
