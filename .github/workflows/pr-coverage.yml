@@ -38,19 +38,39 @@ jobs:
           dotnet test App/backend-api/Microsoft.GS.DPS.Tests/Microsoft.GS.DPS.Tests.csproj \
             --configuration Release \
             --logger "trx;LogFileName=test-results.trx" \
-            /p:CollectCoverage=true \
-            /p:CoverletOutputFormat=cobertura \
-            /p:CoverletOutput=TestResults/coverage.cobertura.xml
+            --collect:"XPlat Code Coverage" \
+            --results-directory TestResults
         continue-on-error: true
+
+      - name: Move coverage file to predictable location
+        if: always()
+        run: |
+          echo "Searching for coverage files..."
+          find App/backend-api/Microsoft.GS.DPS.Tests/TestResults -type f -name "*.xml" 2>/dev/null || echo "No XML files found"
+          
+          if [ -d "App/backend-api/Microsoft.GS.DPS.Tests/TestResults" ]; then
+            COVERAGE_FILE=$(find App/backend-api/Microsoft.GS.DPS.Tests/TestResults -name "coverage.cobertura.xml" -type f | head -n 1)
+            if [ -n "$COVERAGE_FILE" ]; then
+              echo "Found coverage file: $COVERAGE_FILE"
+              mkdir -p App/backend-api/Microsoft.GS.DPS.Tests/TestResults
+              cp "$COVERAGE_FILE" App/backend-api/Microsoft.GS.DPS.Tests/TestResults/coverage.cobertura.xml
+              echo "Copied to: App/backend-api/Microsoft.GS.DPS.Tests/TestResults/coverage.cobertura.xml"
+            else
+              echo "No coverage.cobertura.xml found in TestResults"
+            fi
+          else
+            echo "TestResults directory not found"
+          fi
 
       - name: Check if coverage file exists
         if: always()
         run: |
           if [ -f "App/backend-api/Microsoft.GS.DPS.Tests/TestResults/coverage.cobertura.xml" ]; then
-            echo "Coverage file found"
+            echo "✅ Coverage file found"
+            ls -lh App/backend-api/Microsoft.GS.DPS.Tests/TestResults/coverage.cobertura.xml
             echo "BACKEND_COVERAGE_EXISTS=true" >> $GITHUB_ENV
           else
-            echo "Coverage file not found"
+            echo "❌ Coverage file not found"
             echo "BACKEND_COVERAGE_EXISTS=false" >> $GITHUB_ENV
           fi
 
@@ -155,30 +175,75 @@ jobs:
           output: both
         continue-on-error: true
 
+      - name: Generate frontend coverage summary
+        if: steps.check_files.outputs.frontend_exists == 'true'
+        run: |
+          if [ -f "coverage/frontend/lcov-report/index.html" ]; then
+            # Extract summary from Jest HTML report
+            echo "## Frontend Coverage (Jest)" > frontend-summary.md
+            echo "" >> frontend-summary.md
+            
+            # Parse coverage.json for metrics
+            if [ -f "coverage/frontend/coverage-summary.json" ]; then
+              cat coverage/frontend/coverage-summary.json | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+total = data.get('total', {})
+print(f'**Overall Coverage: {total.get(\"lines\", {}).get(\"pct\", 0):.2f}%**')
+print()
+print('| Metric | Covered | Total | Percentage |')
+print('|--------|---------|-------|------------|')
+for metric in ['statements', 'branches', 'functions', 'lines']:
+    m = total.get(metric, {})
+    print(f'| {metric.title()} | {m.get(\"covered\", 0)} | {m.get(\"total\", 0)} | {m.get(\"pct\", 0):.2f}% |')
+" >> frontend-summary.md 2>/dev/null || echo "Coverage: Available (details in artifacts)" >> frontend-summary.md
+            else
+              echo "✅ Coverage collected successfully" >> frontend-summary.md
+            fi
+          fi
+        continue-on-error: true
+
       - name: Generate coverage report comment
         if: always()
         run: |
-          echo "# Code Coverage Report" > coverage-comment.md
+          echo "# 📊 Code Coverage Report" > coverage-comment.md
           echo "" >> coverage-comment.md
           
           if [ "${{ steps.check_files.outputs.backend_exists }}" == "true" ] && [ -f "code-coverage-results.md" ]; then
-            echo "## Backend Coverage (.NET)" >> coverage-comment.md
+            echo "## 🎯 Backend Coverage (.NET)" >> coverage-comment.md
+            echo "" >> coverage-comment.md
             cat code-coverage-results.md >> coverage-comment.md
             echo "" >> coverage-comment.md
           else
-            echo "## Backend Coverage (.NET)" >> coverage-comment.md
-            echo "⚠️ Backend coverage not available" >> coverage-comment.md
+            echo "## 🎯 Backend Coverage (.NET)" >> coverage-comment.md
+            echo "" >> coverage-comment.md
+            echo "⚠️ **Backend coverage not available**" >> coverage-comment.md
+            echo "" >> coverage-comment.md
+            echo "*Coverage file generation failed. This may be due to:*" >> coverage-comment.md
+            echo "- Coverlet collector not configured correctly" >> coverage-comment.md
+            echo "- Test execution errors" >> coverage-comment.md
+            echo "- Missing test project reference" >> coverage-comment.md
             echo "" >> coverage-comment.md
           fi
           
           if [ "${{ steps.check_files.outputs.frontend_exists }}" == "true" ]; then
-            echo "## Frontend Coverage (Jest)" >> coverage-comment.md
-            echo "✅ Frontend coverage collected" >> coverage-comment.md
+            echo "## ⚛️ Frontend Coverage (Jest)" >> coverage-comment.md
+            echo "" >> coverage-comment.md
+            if [ -f "frontend-summary.md" ]; then
+              cat frontend-summary.md >> coverage-comment.md
+            else
+              echo "✅ Frontend coverage collected" >> coverage-comment.md
+            fi
             echo "" >> coverage-comment.md
           else
-            echo "## Frontend Coverage (Jest)" >> coverage-comment.md
-            echo "⚠️ Frontend coverage not available" >> coverage-comment.md
+            echo "## ⚛️ Frontend Coverage (Jest)" >> coverage-comment.md
+            echo "" >> coverage-comment.md
+            echo "⚠️ **Frontend coverage not available**" >> coverage-comment.md
+            echo "" >> coverage-comment.md
           fi
+          
+          echo "---" >> coverage-comment.md
+          echo "*Coverage reports generated from commit: ${{ github.sha }}*" >> coverage-comment.md
 
       - name: Add Coverage PR Comment
         uses: marocchino/sticky-pull-request-comment@v2
