@@ -1,4 +1,4 @@
-name: PR Coverage Check (Multi-Language)
+name: PR Coverage Check (Backend)
 
 on:
   pull_request_target:
@@ -112,62 +112,10 @@ jobs:
           reporter: dotnet-trx
         continue-on-error: true
 
-  test-frontend:
-    runs-on: ubuntu-latest
-    name: Frontend Tests (Jest)
-
-    steps:
-      - name: Checkout PR code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install frontend dependencies
-        run: |
-          cd App/frontend-app
-          npm install --legacy-peer-deps
-        continue-on-error: true
-
-      - name: Run frontend tests with coverage
-        id: frontend_tests
-        run: |
-          cd App/frontend-app
-          npm test -- --coverage --passWithNoTests --ci --json --outputFile=test-results.json 2>&1 | tee ../frontend-test-output.log
-        continue-on-error: true
-
-      - name: Extract frontend test statistics
-        if: always()
-        run: |
-          cd App/frontend-app
-          # Try to extract from JSON output first
-          if [ -f "test-results.json" ] && command -v jq &> /dev/null; then
-            TOTAL=$(jq -r '.numTotalTests // 0' test-results.json)
-            PASSED=$(jq -r '.numPassedTests // 0' test-results.json)
-            FAILED=$(jq -r '.numFailedTests // 0' test-results.json)
-            SKIPPED=$(jq -r '.numPendingTests // 0' test-results.json)
-            
-            echo "{\"total\":${TOTAL},\"passed\":${PASSED},\"failed\":${FAILED},\"skipped\":${SKIPPED}}" > frontend-test-stats.json
-          else
-            # Fallback to log parsing
-            echo '{"total":0,"passed":0,"failed":0,"skipped":0}' > frontend-test-stats.json
-          fi
-
-      - name: Upload frontend coverage
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: frontend-coverage
-          path: |
-            App/frontend-app/coverage/
-            App/frontend-app/frontend-test-stats.json
-
   coverage-report:
     runs-on: ubuntu-latest
-    name: Combined Coverage Report
-    needs: [test-backend, test-frontend]
+    name: Coverage Report
+    needs: [test-backend]
     if: always()
 
     steps:
@@ -181,31 +129,17 @@ jobs:
           path: ./coverage/backend
         continue-on-error: true
 
-      - name: Download frontend coverage
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-coverage
-          path: ./coverage/frontend
-        continue-on-error: true
-
       - name: Check coverage files
         id: check_files
         run: |
           BACKEND_EXISTS="false"
-          FRONTEND_EXISTS="false"
           
           if [ -f "coverage/backend/coverage.cobertura.xml" ]; then
             BACKEND_EXISTS="true"
             echo "Backend coverage file found"
           fi
           
-          if [ -f "coverage/frontend/lcov.info" ]; then
-            FRONTEND_EXISTS="true"
-            echo "Frontend coverage file found"
-          fi
-          
           echo "backend_exists=$BACKEND_EXISTS" >> $GITHUB_OUTPUT
-          echo "frontend_exists=$FRONTEND_EXISTS" >> $GITHUB_OUTPUT
 
       - name: Generate backend coverage summary
         if: steps.check_files.outputs.backend_exists == 'true'
@@ -215,49 +149,6 @@ jobs:
           badge: true
           format: markdown
           output: both
-        continue-on-error: true
-
-      - name: Generate frontend coverage summary
-        if: steps.check_files.outputs.frontend_exists == 'true'
-        run: |
-          if [ -f "coverage/frontend/coverage-summary.json" ]; then
-            # Extract metrics using jq
-            if command -v jq &> /dev/null; then
-              LINES_PCT=$(jq -r '.total.lines.pct // 0' coverage/frontend/coverage-summary.json)
-              STMTS_COV=$(jq -r '.total.statements.covered // 0' coverage/frontend/coverage-summary.json)
-              STMTS_TOT=$(jq -r '.total.statements.total // 0' coverage/frontend/coverage-summary.json)
-              STMTS_PCT=$(jq -r '.total.statements.pct // 0' coverage/frontend/coverage-summary.json)
-              BRANCH_COV=$(jq -r '.total.branches.covered // 0' coverage/frontend/coverage-summary.json)
-              BRANCH_TOT=$(jq -r '.total.branches.total // 0' coverage/frontend/coverage-summary.json)
-              BRANCH_PCT=$(jq -r '.total.branches.pct // 0' coverage/frontend/coverage-summary.json)
-              FUNC_COV=$(jq -r '.total.functions.covered // 0' coverage/frontend/coverage-summary.json)
-              FUNC_TOT=$(jq -r '.total.functions.total // 0' coverage/frontend/coverage-summary.json)
-              FUNC_PCT=$(jq -r '.total.functions.pct // 0' coverage/frontend/coverage-summary.json)
-              LINES_COV=$(jq -r '.total.lines.covered // 0' coverage/frontend/coverage-summary.json)
-              LINES_TOT=$(jq -r '.total.lines.total // 0' coverage/frontend/coverage-summary.json)
-              
-              # Create detailed coverage summary (without header - will be added in final step)
-              echo "![Jest Coverage](https://img.shields.io/badge/Jest_Coverage-${LINES_PCT}%25-green?style=flat&logo=jest)" > frontend-summary.md
-              echo "" >> frontend-summary.md
-              echo "### 📊 Coverage Metrics" >> frontend-summary.md
-              echo "" >> frontend-summary.md
-              echo "| Metric | Covered | Total | Percentage |" >> frontend-summary.md
-              echo "|--------|---------|-------|------------|" >> frontend-summary.md
-              echo "| **Statements** | ${STMTS_COV} | ${STMTS_TOT} | **${STMTS_PCT}%** |" >> frontend-summary.md
-              echo "| **Branches** | ${BRANCH_COV} | ${BRANCH_TOT} | **${BRANCH_PCT}%** |" >> frontend-summary.md
-              echo "| **Functions** | ${FUNC_COV} | ${FUNC_TOT} | **${FUNC_PCT}%** |" >> frontend-summary.md
-              echo "| **Lines** | ${LINES_COV} | ${LINES_TOT} | **${LINES_PCT}%** |" >> frontend-summary.md
-              
-              echo "" >> frontend-summary.md
-              echo "✅ Frontend tests executed successfully"  >> frontend-summary.md
-            else
-              echo "✅ Coverage collected successfully" > frontend-summary.md
-              echo "" >> frontend-summary.md
-              echo "⚠️ Detailed metrics unavailable (jq not found)" >> frontend-summary.md
-            fi
-          else
-            echo "⚠️ coverage-summary.json not found" > frontend-summary.md
-          fi
         continue-on-error: true
 
       - name: Generate coverage report comment
@@ -275,7 +166,7 @@ jobs:
             
             # Add backend test execution summary
             if [ -n "${{ env.BACKEND_TEST_TOTAL }}" ] && [ "${{ env.BACKEND_TEST_TOTAL }}" != "0" ]; then
-              echo "### Backend Test Overview" >> coverage-comment.md
+              echo "### 📋 Test Execution Summary" >> coverage-comment.md
               echo "" >> coverage-comment.md
               echo "| Tests | Passed ✅ | Failed ❌ | Skipped ⏭️ | Duration ⏱️ |" >> coverage-comment.md
               echo "|-------|----------|----------|-----------|------------|" >> coverage-comment.md
@@ -294,42 +185,8 @@ jobs:
             echo "" >> coverage-comment.md
           fi
           
-          # ============ FRONTEND SECTION ============
-          if [ "${{ steps.check_files.outputs.frontend_exists }}" == "true" ]; then
-            echo "## ⚛️ Frontend Coverage (Jest)" >> coverage-comment.md
-            echo "" >> coverage-comment.md
-            if [ -f "frontend-summary.md" ]; then
-              cat frontend-summary.md >> coverage-comment.md
-            else
-              echo "✅ Frontend coverage collected" >> coverage-comment.md
-            fi
-            echo "" >> coverage-comment.md
-            
-            # Add frontend test execution summary
-            if [ -f "coverage/frontend/frontend-test-stats.json" ] && command -v jq &> /dev/null; then
-              FE_TOTAL=$(jq -r '.total // 0' coverage/frontend/frontend-test-stats.json)
-              FE_PASSED=$(jq -r '.passed // 0' coverage/frontend/frontend-test-stats.json)
-              FE_FAILED=$(jq -r '.failed // 0' coverage/frontend/frontend-test-stats.json)
-              FE_SKIPPED=$(jq -r '.skipped // 0' coverage/frontend/frontend-test-stats.json)
-              
-              if [ "$FE_TOTAL" != "0" ]; then
-                echo "### Frontend Test Overview" >> coverage-comment.md
-                echo "" >> coverage-comment.md
-                echo "| Tests | Passed ✅ | Failed ❌ | Skipped ⏭️ |" >> coverage-comment.md
-                echo "|-------|----------|----------|-----------|" >> coverage-comment.md
-                echo "| **${FE_TOTAL}** | ${FE_PASSED} | ${FE_FAILED} | ${FE_SKIPPED} |" >> coverage-comment.md
-                echo "" >> coverage-comment.md
-              fi
-            fi
-          else
-            echo "## ⚛️ Frontend Coverage (Jest)" >> coverage-comment.md
-            echo "" >> coverage-comment.md
-            echo "⚠️ **Frontend coverage not available**" >> coverage-comment.md
-            echo "" >> coverage-comment.md
-          fi
-          
           echo "---" >> coverage-comment.md
-          echo "*📋 Coverage reports generated from commit: \`${{ github.event.pull_request.head.sha || github.sha }}\`*" >> coverage-comment.md
+          echo "*📋 Coverage report generated from commit: \`${{ github.event.pull_request.head.sha || github.sha }}\`*" >> coverage-comment.md
           
           # Debug: Show what we generated
           echo "=== Generated Coverage Comment ==="
