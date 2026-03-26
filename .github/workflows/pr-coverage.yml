@@ -1,4 +1,4 @@
-name: PR Coverage Check (Universal)
+name: PR Coverage Check (Multi-Language)
 
 on:
   pull_request_target:
@@ -11,61 +11,119 @@ on:
       - review_requested
 
 jobs:
-  test:
+  test-backend:
     runs-on: ubuntu-latest
+    name: Backend Tests (.NET)
 
     steps:
       - name: Checkout PR code
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
         with:
-          python-version: '3.11'
+          dotnet-version: '8.0.x'
 
-      - name: Upgrade pip
-        run: pip install --upgrade pip
+      - name: Restore dependencies
+        run: dotnet restore App/backend-api/Microsoft.GS.DPS.sln
 
-      # 🔥 Smart dependency installation
-      - name: Install dependencies (auto-detect)
+      - name: Build backend
+        run: dotnet build App/backend-api/Microsoft.GS.DPS.sln --configuration Release --no-restore
+
+      - name: Run backend tests with coverage
         run: |
-          pip install pytest pytest-cov
+          dotnet test App/backend-api/Microsoft.GS.DPS.Tests/Microsoft.GS.DPS.Tests.csproj \
+            --configuration Release \
+            --no-build \
+            --logger "trx;LogFileName=test-results.trx" \
+            /p:CollectCoverage=true \
+            /p:CoverletOutputFormat=cobertura \
+            /p:CoverletOutput=./coverage/
 
-          echo "Checking dependency files..."
-
-          if [ -f pyproject.toml ]; then
-            echo "Installing from pyproject.toml"
-            pip install .
-          fi
-
-          if [ -f requirements.txt ]; then
-            echo "Installing root requirements.txt"
-            pip install -r requirements.txt
-          fi
-
-          find . -name "requirements.txt" -not -path "./.venv/*" | while read req; do
-            echo "Installing $req"
-            pip install -r $req
-          done
-
-      # 🔥 Smart test execution + fallback handling
-      - name: Run tests with coverage
-        env:
-          URL: "https://dummy-url.com"
-        run: |
-          echo "Running pytest..."
-
-          # Try running all tests first
-          pytest --cov=. --cov-report=xml || echo "Retrying without e2e..."
-
-          # If failed, retry skipping e2e tests
-          if [ ! -f coverage.xml ]; then
-            echo "Skipping e2e tests..."
-            pytest --ignore=tests/e2e-test --cov=. --cov-report=xml
-          fi
-
-      # 🔥 PR Coverage Comment
-      - name: Add Coverage Comment to PR
-        uses: MishaKav/pytest-coverage-comment@v1
+      - name: Upload backend coverage
+        uses: actions/upload-artifact@v4
+        if: always()
         with:
-          pytest-coverage-path: ./coverage.xml
+          name: backend-coverage
+          path: App/backend-api/Microsoft.GS.DPS.Tests/coverage/coverage.cobertura.xml
+
+      - name: Backend Test Report
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Backend Test Results
+          path: 'App/backend-api/Microsoft.GS.DPS.Tests/TestResults/*.trx'
+          reporter: dotnet-trx
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    name: Frontend Tests (Jest)
+
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: App/frontend-app/package-lock.json
+
+      - name: Install frontend dependencies
+        run: |
+          cd App/frontend-app
+          npm ci --legacy-peer-deps
+
+      - name: Run frontend tests with coverage
+        run: |
+          cd App/frontend-app
+          npm test -- --coverage --passWithNoTests --ci
+
+      - name: Upload frontend coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-coverage
+          path: App/frontend-app/coverage/
+
+  coverage-report:
+    runs-on: ubuntu-latest
+    name: Combined Coverage Report
+    needs: [test-backend, test-frontend]
+    if: always()
+
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@v4
+
+      - name: Download backend coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-coverage
+          path: ./coverage/backend
+        continue-on-error: true
+
+      - name: Download frontend coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-coverage
+          path: ./coverage/frontend
+        continue-on-error: true
+
+      - name: Generate coverage summary
+        uses: irongut/CodeCoverageSummary@v1.3.0
+        with:
+          filename: 'coverage/backend/coverage.cobertura.xml'
+          badge: true
+          format: markdown
+          output: both
+        continue-on-error: true
+
+      - name: Add Coverage PR Comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        if: github.event_name == 'pull_request_target'
+        with:
+          header: coverage
+          path: code-coverage-results.md
+        continue-on-error: true
