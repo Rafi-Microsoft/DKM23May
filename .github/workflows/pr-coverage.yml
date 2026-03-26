@@ -30,16 +30,18 @@ jobs:
       - name: Build backend
         run: dotnet build App/backend-api/Microsoft.GS.DPS.sln --configuration Release --no-restore
 
+      - name: Restore test project
+        run: dotnet restore App/backend-api/Microsoft.GS.DPS.Tests/Microsoft.GS.DPS.Tests.csproj
+
       - name: Run backend tests with coverage
         run: |
-          cd App/backend-api
-          dotnet test Microsoft.GS.DPS.Tests/Microsoft.GS.DPS.Tests.csproj \
+          dotnet test App/backend-api/Microsoft.GS.DPS.Tests/Microsoft.GS.DPS.Tests.csproj \
             --configuration Release \
-            --no-restore \
             --logger "trx;LogFileName=test-results.trx" \
             /p:CollectCoverage=true \
             /p:CoverletOutputFormat=cobertura \
-            /p:CoverletOutput=./TestResults/
+            /p:CoverletOutput=TestResults/ \
+            /p:ExcludeByFile="**/obj/**"
         continue-on-error: true
 
       - name: Upload backend coverage
