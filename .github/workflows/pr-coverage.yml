@@ -178,27 +178,37 @@ jobs:
       - name: Generate frontend coverage summary
         if: steps.check_files.outputs.frontend_exists == 'true'
         run: |
-          if [ -f "coverage/frontend/lcov-report/index.html" ]; then
-            # Extract summary from Jest HTML report
+          if [ -f "coverage/frontend/coverage-summary.json" ]; then
             echo "## Frontend Coverage (Jest)" > frontend-summary.md
             echo "" >> frontend-summary.md
             
-            # Parse coverage.json for metrics
-            if [ -f "coverage/frontend/coverage-summary.json" ]; then
-              cat coverage/frontend/coverage-summary.json | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-total = data.get('total', {})
-print(f'**Overall Coverage: {total.get(\"lines\", {}).get(\"pct\", 0):.2f}%**')
-print()
-print('| Metric | Covered | Total | Percentage |')
-print('|--------|---------|-------|------------|')
-for metric in ['statements', 'branches', 'functions', 'lines']:
-    m = total.get(metric, {})
-    print(f'| {metric.title()} | {m.get(\"covered\", 0)} | {m.get(\"total\", 0)} | {m.get(\"pct\", 0):.2f}% |')
-" >> frontend-summary.md 2>/dev/null || echo "Coverage: Available (details in artifacts)" >> frontend-summary.md
+            # Extract metrics using jq or basic parsing
+            if command -v jq &> /dev/null; then
+              LINES_PCT=$(jq -r '.total.lines.pct // 0' coverage/frontend/coverage-summary.json)
+              STMTS_COV=$(jq -r '.total.statements.covered // 0' coverage/frontend/coverage-summary.json)
+              STMTS_TOT=$(jq -r '.total.statements.total // 0' coverage/frontend/coverage-summary.json)
+              STMTS_PCT=$(jq -r '.total.statements.pct // 0' coverage/frontend/coverage-summary.json)
+              BRANCH_COV=$(jq -r '.total.branches.covered // 0' coverage/frontend/coverage-summary.json)
+              BRANCH_TOT=$(jq -r '.total.branches.total // 0' coverage/frontend/coverage-summary.json)
+              BRANCH_PCT=$(jq -r '.total.branches.pct // 0' coverage/frontend/coverage-summary.json)
+              FUNC_COV=$(jq -r '.total.functions.covered // 0' coverage/frontend/coverage-summary.json)
+              FUNC_TOT=$(jq -r '.total.functions.total // 0' coverage/frontend/coverage-summary.json)
+              FUNC_PCT=$(jq -r '.total.functions.pct // 0' coverage/frontend/coverage-summary.json)
+              LINES_COV=$(jq -r '.total.lines.covered // 0' coverage/frontend/coverage-summary.json)
+              LINES_TOT=$(jq -r '.total.lines.total // 0' coverage/frontend/coverage-summary.json)
+              
+              echo "**Overall Coverage: ${LINES_PCT}%**" >> frontend-summary.md
+              echo "" >> frontend-summary.md
+              echo "| Metric | Covered | Total | Percentage |" >> frontend-summary.md
+              echo "|--------|---------|-------|------------|" >> frontend-summary.md
+              echo "| Statements | ${STMTS_COV} | ${STMTS_TOT} | ${STMTS_PCT}% |" >> frontend-summary.md
+              echo "| Branches | ${BRANCH_COV} | ${BRANCH_TOT} | ${BRANCH_PCT}% |" >> frontend-summary.md
+              echo "| Functions | ${FUNC_COV} | ${FUNC_TOT} | ${FUNC_PCT}% |" >> frontend-summary.md
+              echo "| Lines | ${LINES_COV} | ${LINES_TOT} | ${LINES_PCT}% |" >> frontend-summary.md
             else
               echo "✅ Coverage collected successfully" >> frontend-summary.md
+              echo "" >> frontend-summary.md
+              echo "(Detailed metrics require jq - install for full report)" >> frontend-summary.md
             fi
           fi
         continue-on-error: true
