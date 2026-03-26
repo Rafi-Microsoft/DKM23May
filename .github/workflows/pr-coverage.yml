@@ -38,10 +38,15 @@ jobs:
           dotnet test App/backend-api/Microsoft.GS.DPS.Tests/Microsoft.GS.DPS.Tests.csproj \
             --configuration Release \
             --logger "trx;LogFileName=test-results.trx" \
-            /p:CollectCoverage=true \
-            /p:CoverletOutputFormat=cobertura \
-            /p:CoverletOutput=TestResults/ \
-            /p:ExcludeByFile="**/obj/**"
+            --collect:"XPlat Code Coverage" \
+            --results-directory App/backend-api/Microsoft.GS.DPS.Tests/TestResults
+        continue-on-error: true
+
+      - name: List coverage files
+        if: always()
+        run: |
+          echo "Listing TestResults directory:"
+          find App/backend-api/Microsoft.GS.DPS.Tests/TestResults -type f -name "*.xml" 2>/dev/null || echo "No XML files found"
         continue-on-error: true
 
       - name: Upload backend coverage
@@ -49,7 +54,8 @@ jobs:
         if: always()
         with:
           name: backend-coverage
-          path: App/backend-api/Microsoft.GS.DPS.Tests/TestResults/coverage.cobertura.xml
+          path: App/backend-api/Microsoft.GS.DPS.Tests/TestResults/**/coverage.cobertura.xml
+          if-no-files-found: warn
 
       - name: Backend Test Report
         uses: dorny/test-reporter@v1
