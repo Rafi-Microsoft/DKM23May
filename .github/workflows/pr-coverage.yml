@@ -38,24 +38,28 @@ jobs:
           dotnet test App/backend-api/Microsoft.GS.DPS.Tests/Microsoft.GS.DPS.Tests.csproj \
             --configuration Release \
             --logger "trx;LogFileName=test-results.trx" \
-            --collect:"XPlat Code Coverage" \
-            --results-directory App/backend-api/Microsoft.GS.DPS.Tests/TestResults
+            /p:CollectCoverage=true \
+            /p:CoverletOutputFormat=cobertura \
+            /p:CoverletOutput=TestResults/coverage.cobertura.xml
         continue-on-error: true
 
-      - name: List coverage files
+      - name: Check if coverage file exists
         if: always()
         run: |
-          echo "Listing TestResults directory:"
-          find App/backend-api/Microsoft.GS.DPS.Tests/TestResults -type f -name "*.xml" 2>/dev/null || echo "No XML files found"
-        continue-on-error: true
+          if [ -f "App/backend-api/Microsoft.GS.DPS.Tests/TestResults/coverage.cobertura.xml" ]; then
+            echo "Coverage file found"
+            echo "BACKEND_COVERAGE_EXISTS=true" >> $GITHUB_ENV
+          else
+            echo "Coverage file not found"
+            echo "BACKEND_COVERAGE_EXISTS=false" >> $GITHUB_ENV
+          fi
 
       - name: Upload backend coverage
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && env.BACKEND_COVERAGE_EXISTS == 'true'
         with:
           name: backend-coverage
-          path: App/backend-api/Microsoft.GS.DPS.Tests/TestResults/**/coverage.cobertura.xml
-          if-no-files-found: warn
+          path: App/backend-api/Microsoft.GS.DPS.Tests/TestResults/coverage.cobertura.xml
 
       - name: Backend Test Report
         uses: dorny/test-reporter@v1
@@ -122,7 +126,27 @@ jobs:
           path: ./coverage/frontend
         continue-on-error: true
 
-      - name: Generate coverage summary
+      - name: Check coverage files
+        id: check_files
+        run: |
+          BACKEND_EXISTS="false"
+          FRONTEND_EXISTS="false"
+          
+          if [ -f "coverage/backend/coverage.cobertura.xml" ]; then
+            BACKEND_EXISTS="true"
+            echo "Backend coverage file found"
+          fi
+          
+          if [ -f "coverage/frontend/lcov.info" ]; then
+            FRONTEND_EXISTS="true"
+            echo "Frontend coverage file found"
+          fi
+          
+          echo "backend_exists=$BACKEND_EXISTS" >> $GITHUB_OUTPUT
+          echo "frontend_exists=$FRONTEND_EXISTS" >> $GITHUB_OUTPUT
+
+      - name: Generate backend coverage summary
+        if: steps.check_files.outputs.backend_exists == 'true'
         uses: irongut/CodeCoverageSummary@v1.3.0
         with:
           filename: 'coverage/backend/coverage.cobertura.xml'
@@ -131,10 +155,35 @@ jobs:
           output: both
         continue-on-error: true
 
+      - name: Generate coverage report comment
+        if: always()
+        run: |
+          echo "# Code Coverage Report" > coverage-comment.md
+          echo "" >> coverage-comment.md
+          
+          if [ "${{ steps.check_files.outputs.backend_exists }}" == "true" ] && [ -f "code-coverage-results.md" ]; then
+            echo "## Backend Coverage (.NET)" >> coverage-comment.md
+            cat code-coverage-results.md >> coverage-comment.md
+            echo "" >> coverage-comment.md
+          else
+            echo "## Backend Coverage (.NET)" >> coverage-comment.md
+            echo "⚠️ Backend coverage not available" >> coverage-comment.md
+            echo "" >> coverage-comment.md
+          fi
+          
+          if [ "${{ steps.check_files.outputs.frontend_exists }}" == "true" ]; then
+            echo "## Frontend Coverage (Jest)" >> coverage-comment.md
+            echo "✅ Frontend coverage collected" >> coverage-comment.md
+            echo "" >> coverage-comment.md
+          else
+            echo "## Frontend Coverage (Jest)" >> coverage-comment.md
+            echo "⚠️ Frontend coverage not available" >> coverage-comment.md
+          fi
+
       - name: Add Coverage PR Comment
         uses: marocchino/sticky-pull-request-comment@v2
-        if: github.event_name == 'pull_request_target' && hashFiles('code-coverage-results.md') != ''
+        if: github.event_name == 'pull_request_target' && hashFiles('coverage-comment.md') != ''
         with:
           header: coverage
-          path: code-coverage-results.md
+          path: coverage-comment.md
         continue-on-error: true
