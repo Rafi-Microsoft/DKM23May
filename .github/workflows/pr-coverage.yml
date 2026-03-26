@@ -14,6 +14,12 @@ jobs:
   test-backend:
     runs-on: ubuntu-latest
     name: Backend Tests (.NET)
+    outputs:
+      test_total: ${{ steps.test_stats.outputs.total }}
+      test_passed: ${{ steps.test_stats.outputs.passed }}
+      test_failed: ${{ steps.test_stats.outputs.failed }}
+      test_skipped: ${{ steps.test_stats.outputs.skipped }}
+      test_duration: ${{ steps.test_stats.outputs.duration }}
 
     steps:
       - name: Checkout PR code
@@ -45,6 +51,7 @@ jobs:
         continue-on-error: true
 
       - name: Extract backend test statistics
+        id: test_stats
         if: always()
         run: |
           # Extract test stats from output
@@ -55,13 +62,19 @@ jobs:
             TOTAL=$(grep -oP "Total:\s+\K\d+" backend-test-output.log | tail -1 || echo "0")
             DURATION=$(grep -oP "Duration:\s+\K[^-]+" backend-test-output.log | tail -1 | xargs || echo "N/A")
             
-            echo "BACKEND_TEST_PASSED=${PASSED}" >> $GITHUB_ENV
-            echo "BACKEND_TEST_FAILED=${FAILED}" >> $GITHUB_ENV
-            echo "BACKEND_TEST_SKIPPED=${SKIPPED}" >> $GITHUB_ENV
-            echo "BACKEND_TEST_TOTAL=${TOTAL}" >> $GITHUB_ENV
-            echo "BACKEND_TEST_DURATION=${DURATION}" >> $GITHUB_ENV
+            echo "total=${TOTAL}" >> $GITHUB_OUTPUT
+            echo "passed=${PASSED}" >> $GITHUB_OUTPUT
+            echo "failed=${FAILED}" >> $GITHUB_OUTPUT
+            echo "skipped=${SKIPPED}" >> $GITHUB_OUTPUT
+            echo "duration=${DURATION}" >> $GITHUB_OUTPUT
             
             echo "Backend Tests: Passed=${PASSED}, Failed=${FAILED}, Skipped=${SKIPPED}, Total=${TOTAL}, Duration=${DURATION}"
+          else
+            echo "total=0" >> $GITHUB_OUTPUT
+            echo "passed=0" >> $GITHUB_OUTPUT
+            echo "failed=0" >> $GITHUB_OUTPUT
+            echo "skipped=0" >> $GITHUB_OUTPUT
+            echo "duration=N/A" >> $GITHUB_OUTPUT
           fi
 
       - name: Move coverage file to predictable location
@@ -165,12 +178,13 @@ jobs:
             echo "" >> coverage-comment.md
             
             # Add backend test execution summary
-            if [ -n "${{ env.BACKEND_TEST_TOTAL }}" ] && [ "${{ env.BACKEND_TEST_TOTAL }}" != "0" ]; then
+            TEST_TOTAL="${{ needs.test-backend.outputs.test_total }}"
+            if [ -n "$TEST_TOTAL" ] && [ "$TEST_TOTAL" != "0" ]; then
               echo "### 📋 Test Execution Summary" >> coverage-comment.md
               echo "" >> coverage-comment.md
               echo "| Tests | Passed ✅ | Failed ❌ | Skipped ⏭️ | Duration ⏱️ |" >> coverage-comment.md
               echo "|-------|----------|----------|-----------|------------|" >> coverage-comment.md
-              echo "| **${{ env.BACKEND_TEST_TOTAL }}** | ${{ env.BACKEND_TEST_PASSED }} | ${{ env.BACKEND_TEST_FAILED }} | ${{ env.BACKEND_TEST_SKIPPED }} | ${{ env.BACKEND_TEST_DURATION }} |" >> coverage-comment.md
+              echo "| **${{ needs.test-backend.outputs.test_total }}** | ${{ needs.test-backend.outputs.test_passed }} | ${{ needs.test-backend.outputs.test_failed }} | ${{ needs.test-backend.outputs.test_skipped }} | ${{ needs.test-backend.outputs.test_duration }} |" >> coverage-comment.md
               echo "" >> coverage-comment.md
             fi
           else
